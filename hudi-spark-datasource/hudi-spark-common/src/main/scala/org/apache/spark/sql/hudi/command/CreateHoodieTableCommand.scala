@@ -173,8 +173,7 @@ object CreateHoodieTableCommand {
       table, table.schema)
 
     val tableWithDataSourceProps = table.copy(properties = dataSourceProps ++ table.properties)
-    val client = HiveClientUtils.newClientForMetadata(sparkSession.sparkContext.conf,
-      sparkSession.sessionState.newHadoopConf())
+    val client = HiveClientUtils.getSingletonClientForMetadata(sparkSession)
     // create hive table.
     client.createTable(tableWithDataSourceProps, ignoreIfExists = true)
   }
