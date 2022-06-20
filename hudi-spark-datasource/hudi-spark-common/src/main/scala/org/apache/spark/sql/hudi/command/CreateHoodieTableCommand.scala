@@ -18,6 +18,7 @@
 package org.apache.spark.sql.hudi.command
 
 import org.apache.hadoop.fs.Path
+import org.apache.hadoop.security.UserGroupInformation
 import org.apache.hudi.common.model.HoodieFileFormat
 import org.apache.hudi.common.table.HoodieTableConfig
 import org.apache.hudi.hadoop.HoodieParquetInputFormat
@@ -36,6 +37,7 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.{SPARK_VERSION, SparkConf}
 
+import java.security.PrivilegedExceptionAction
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -173,9 +175,26 @@ object CreateHoodieTableCommand {
       table, table.schema)
 
     val tableWithDataSourceProps = table.copy(properties = dataSourceProps ++ table.properties)
-    val client = HiveClientUtils.getSingletonClientForMetadata(sparkSession)
-    // create hive table.
-    client.createTable(tableWithDataSourceProps, ignoreIfExists = true)
+
+    val currentUser = sparkSession.sparkContext.getLocalProperty("kyuubi.session.user")
+    if (currentUser != null) {
+      doAs(currentUser, {
+        // 传递当前正在操作的用户名
+        val client = HiveClientUtils.getSingletonClientForMetadata(sparkSession).newSession()
+        client.createTable(tableWithDataSourceProps, ignoreIfExists = true)
+      })
+    } else {
+      val client = HiveClientUtils.getSingletonClientForMetadata(sparkSession)
+      // create hive table.
+      client.createTable(tableWithDataSourceProps, ignoreIfExists = true)
+    }
+  }
+
+  private def doAs[T](user: String, f: => T): T = {
+    UserGroupInformation.createRemoteUser(user).doAs[T](
+      new PrivilegedExceptionAction[T] {
+        override def run(): T = f
+      })
   }
 
   // This code is forked from org.apache.spark.sql.hive.HiveExternalCatalog#tableMetaToTableProps
